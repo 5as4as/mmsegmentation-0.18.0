@@ -201,7 +201,7 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
             dict[str, Tensor]: a dictionary of loss components
         """
         seg_logits = self.forward(inputs)
-        losses = self.losses(seg_logits, gt_semantic_seg)
+        losses = self.losses(seg_logits, gt_semantic_seg, img_metas)
         return losses
 
     def forward_test(self, inputs, img_metas, test_cfg):
@@ -229,7 +229,7 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
         return output
 
     @force_fp32(apply_to=('seg_logit', ))
-    def losses(self, seg_logit, seg_label):
+    def losses(self, seg_logit, seg_label, img_metas):
         """Compute segmentation loss."""
         loss = dict()
         seg_logit = resize(
@@ -247,12 +247,14 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
                 loss[loss_decode.loss_name] = loss_decode(
                     seg_logit,
                     seg_label,
+                    img_metas=img_metas,
                     weight=seg_weight,
                     ignore_index=self.ignore_index)
             else:
                 loss[loss_decode.loss_name] += loss_decode(
                     seg_logit,
                     seg_label,
+                    img_metas=img_metas,
                     weight=seg_weight,
                     ignore_index=self.ignore_index)
 

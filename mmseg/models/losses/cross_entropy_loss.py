@@ -181,6 +181,7 @@ class CrossEntropyLoss(nn.Module):
     def forward(self,
                 cls_score,
                 label,
+                img_metas=None,
                 weight=None,
                 avg_factor=None,
                 reduction_override=None,

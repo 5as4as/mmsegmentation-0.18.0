@@ -6,7 +6,7 @@ from .loading import LoadAnnotations, LoadImageFromFile
 from .test_time_aug import MultiScaleFlipAug
 from .transforms import (CLAHE, AdjustGamma, Normalize, Pad,
                          PhotoMetricDistortion, RandomCrop, RandomFlip,
-                         RandomRotate, Rerange, Resize, RGB2Gray, SegRescale)
+                         RandomRotate, Rerange, Resize, RGB2Gray, SegRescale, MyRandomCrop)
 
 __all__ = [
     'Compose', 'to_tensor', 'ToTensor', 'ImageToTensor', 'ToDataContainer',

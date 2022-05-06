@@ -14,6 +14,8 @@ from .resnext import ResNeXt
 from .swin import SwinTransformer
 from .unet import UNet
 from .vit import VisionTransformer
+from .swin_multi_stage import SwinTransformerMultiStage
+from .densenet import DenseNet
 
 __all__ = [
     'ResNet', 'ResNetV1c', 'ResNetV1d', 'ResNeXt', 'HRNet', 'FastSCNN',

@@ -3,6 +3,7 @@ import mmcv
 import numpy as np
 from mmcv.utils import deprecated_api_warning, is_tuple_of
 from numpy import random
+import cv2
 
 from ..builder import PIPELINES
 
@@ -464,6 +465,50 @@ class Normalize(object):
 
 
 @PIPELINES.register_module()
+class Instance_Normalize(object):
+    """Normalize the image.
+
+    Added key is "img_norm_cfg".
+
+    Args:
+        mean (sequence): Mean values of 3 channels.
+        std (sequence): Std values of 3 channels.
+        to_rgb (bool): Whether to convert the image from BGR to RGB,
+            default is true.
+    """
+
+    def __init__(self, to_rgb=True):
+        self.to_rgb = to_rgb
+        self.mean = None
+        self.std = None
+
+    def __call__(self, results):
+        """Call function to normalize images.
+
+        Args:
+            results (dict): Result dict from loading pipeline.
+
+        Returns:
+            dict: Normalized results, 'img_norm_cfg' key is added into
+                result dict.
+        """
+
+        self.mean = np.mean(results['img'], axis=(0, 1))
+        self.std = np.std(results['img'], axis=(0, 1))
+        results['img'] = mmcv.imnormalize(results['img'], self.mean, self.std,
+                                          self.to_rgb)
+        results['img_norm_cfg'] = dict(
+            mean=self.mean, std=self.std, to_rgb=self.to_rgb)
+        return results
+
+    def __repr__(self):
+        repr_str = self.__class__.__name__
+        repr_str += f'(mean={self.mean}, std={self.std}, to_rgb=' \
+                    f'{self.to_rgb})'
+        return repr_str
+
+
+@PIPELINES.register_module()
 class Rerange(object):
     """Rerange the image pixel value.
 
@@ -549,7 +594,7 @@ class CLAHE(object):
 
     def __repr__(self):
         repr_str = self.__class__.__name__
-        repr_str += f'(clip_limit={self.clip_limit}, '\
+        repr_str += f'(clip_limit={self.clip_limit}, ' \
                     f'tile_grid_size={self.tile_grid_size})'
         return repr_str
 
@@ -628,6 +673,83 @@ class RandomCrop(object):
 
 
 @PIPELINES.register_module()
+class MyRandomCrop(object):
+    """Random crop the image & seg.
+
+    Args:
+        crop_size (tuple): Expected size after cropping, (h, w).
+        cat_max_ratio (float): The maximum ratio that single category could
+            occupy.
+    """
+
+    def __init__(self, crop_size, cat_max_ratio=1., ignore_index=255):
+        assert crop_size[0] > 0 and crop_size[1] > 0
+        self.crop_size = crop_size
+        self.cat_max_ratio = cat_max_ratio
+        self.ignore_index = ignore_index
+
+    def get_crop_bbox(self, img):
+        """Randomly get a crop bounding box."""
+        margin_h = max(img.shape[0] - self.crop_size[0], 0)
+        margin_w = max(img.shape[1] - self.crop_size[1], 0)
+        offset_h = np.random.randint(0, margin_h + 1)
+        offset_w = np.random.randint(0, margin_w + 1)
+        crop_y1, crop_y2 = offset_h, offset_h + self.crop_size[0]
+        crop_x1, crop_x2 = offset_w, offset_w + self.crop_size[1]
+
+        return crop_y1, crop_y2, crop_x1, crop_x2
+
+    def crop(self, img, crop_bbox):
+        """Crop from ``img``"""
+        crop_y1, crop_y2, crop_x1, crop_x2 = crop_bbox
+        img = img[crop_y1:crop_y2, crop_x1:crop_x2, ...]
+        return img
+
+    def __call__(self, results):
+        """Call function to randomly crop images, semantic segmentation maps.
+
+        Args:
+            results (dict): Result dict from loading pipeline.
+
+        Returns:
+            dict: Randomly cropped results, 'img_shape' key in result dict is
+                updated according to crop size.
+        """
+
+        img = results['img']
+        gt_semantic_seg = results['gt_semantic_seg'].copy()
+        gt_semantic_seg[gt_semantic_seg > 0] = 255
+        contours, hierarchy = cv2.findContours(gt_semantic_seg, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cod = cv2.boundingRect(contours[0])
+        x, y, w, h = cod
+        x1, y1, x2, y2 = x, y, x + w, y + h
+        crop_bbox = self.get_crop_bbox(img)
+        crop_y1, crop_y2, crop_x1, crop_x2 = crop_bbox
+        if x1 < crop_x1 or x2 > crop_x2 or y1 < crop_y1 or y2 > crop_y2:
+            # Repeat 10 times
+            for _ in range(10):
+                crop_bbox = self.get_crop_bbox(img)
+                crop_y1, crop_y2, crop_x1, crop_x2 = crop_bbox
+                if x1 >= crop_x1 and x2 <= crop_x2 and y1 >= crop_y1 and y2 <= crop_y2:
+                    break
+
+        # crop the image
+        img = self.crop(img, crop_bbox)
+        img_shape = img.shape
+        results['img'] = img
+        results['img_shape'] = img_shape
+
+        # crop semantic seg
+        for key in results.get('seg_fields', []):
+            results[key] = self.crop(results[key], crop_bbox)
+
+        return results
+
+    def __repr__(self):
+        return self.__class__.__name__ + f'(crop_size={self.crop_size})'
+
+
+@PIPELINES.register_module()
 class RandomRotate(object):
     """Rotate the image & seg.
 
@@ -660,8 +782,10 @@ class RandomRotate(object):
             self.degree = (-degree, degree)
         else:
             self.degree = degree
+        '''
         assert len(self.degree) == 2, f'degree {self.degree} should be a ' \
                                       f'tuple of (min, max)'
+        '''
         self.pal_val = pad_val
         self.seg_pad_val = seg_pad_val
         self.center = center
@@ -678,7 +802,12 @@ class RandomRotate(object):
         """
 
         rotate = True if np.random.rand() < self.prob else False
-        degree = np.random.uniform(min(*self.degree), max(*self.degree))
+        # NEW
+        if len(self.degree) > 2:
+            degree = self.degree[np.random.randint(len(self.degree))]
+        else:
+            degree = np.random.uniform(min(*self.degree), max(*self.degree))
+        # END
         if rotate:
             # rotate image
             results['img'] = mmcv.imrotate(
@@ -779,7 +908,7 @@ class AdjustGamma(object):
         assert gamma > 0
         self.gamma = gamma
         inv_gamma = 1.0 / gamma
-        self.table = np.array([(i / 255.0)**inv_gamma * 255
+        self.table = np.array([(i / 255.0) ** inv_gamma * 255
                                for i in np.arange(256)]).astype('uint8')
 
     def __call__(self, results):
@@ -901,8 +1030,8 @@ class PhotoMetricDistortion(object):
         if random.randint(2):
             img = mmcv.bgr2hsv(img)
             img[:, :,
-                0] = (img[:, :, 0].astype(int) +
-                      random.randint(-self.hue_delta, self.hue_delta)) % 180
+            0] = (img[:, :, 0].astype(int) +
+                  random.randint(-self.hue_delta, self.hue_delta)) % 180
             img = mmcv.hsv2bgr(img)
         return img
 

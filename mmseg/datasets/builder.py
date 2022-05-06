@@ -11,6 +11,8 @@ from mmcv.runner import get_dist_info
 from mmcv.utils import Registry, build_from_cfg, digit_version
 from torch.utils.data import DataLoader, DistributedSampler
 
+from .my_sampler import My_sampler
+
 if platform.system() != 'Windows':
     # https://github.com/pytorch/pytorch/issues/973
     import resource
@@ -122,8 +124,13 @@ def build_dataloader(dataset,
     """
     rank, world_size = get_dist_info()
     if dist:
-        sampler = DistributedSampler(
-            dataset, world_size, rank, shuffle=shuffle)
+        # new
+        if not hasattr(dataset, 'cumulative_sizes'):
+            sampler = DistributedSampler(
+                dataset, world_size, rank, shuffle=shuffle)
+        else:
+            sampler = My_sampler(dataset, world_size, rank, shuffle=shuffle)
+        # end
         shuffle = False
         batch_size = samples_per_gpu
         num_workers = workers_per_gpu
